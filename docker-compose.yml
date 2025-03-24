@@ -1,0 +1,36 @@
+services:
+  planner-server:
+    build: ./planner-server
+    container_name: planner-server
+    volumes:
+      - planner-data:/app/data
+    restart: unless-stopped
+  planner-ui:
+    build: ./planner-ui
+    container_name: planner-ui
+    restart: unless-stopped
+  nginx:
+    build: ./nginx
+    container_name: nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - planner-server
+      - planner-ui
+      - ollama
+      - searxng
+    restart: unless-stopped
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    environment:
+      - BASE_URL=http://localhost/searxng/
+    restart: unless-stopped
+volumes:
+  planner-data:
