@@ -1,4 +1,3 @@
-<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -19,6 +18,9 @@
     button { background: #00ffcc; color: #0a0a0a; border: none; padding: 5px; }
     .form-overlay { position: fixed; top: 20%; left: 20%; background: #1a1a1a; padding: 20px; border: 1px solid #00ffcc; display: none; }
     .form-overlay input, .form-overlay textarea { width: 100%; margin: 5px 0; }
+    .event:hover { background: #00ffcc; color: #0a0a0a; cursor: move; }
+    .hour:hover { background: #1a1a1a; }
+    select { background: #0a0a0a; color: #00ffcc; border: 1px solid #00ffcc; }
   </style>
 </head>
 <body>
@@ -45,95 +47,168 @@
     <input id="duration" type="number" placeholder="Duration (minutes)">
     <textarea id="description" placeholder="Description"></textarea>
     <input id="project" placeholder="Project">
+    <select id="recurrence">
+        <option value="none">None</option>
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+    </select>
     <button onclick="saveEvent()">Save</button>
     <button onclick="closeForm()">Cancel</button>
-  </div>
-  <script>
+</div>
+  <script type="module">
+    import interact from 'https://cdn.interactjs.io/v1.10.27/interactjs/index.js';
+
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const startHour = 0;
     const endHour = 24;
     let selectedSlot = null;
+    const startOfWeek = new Date();
+    startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1); // Start on Monday
 
     function renderCalendar() {
-      const hoursDiv = document.getElementById('hours');
-      hoursDiv.innerHTML = days.map((_, i) => `
-        <div class="hour-column" data-day="${i}">
-          ${Array.from({ length: (endHour - startHour) * 2 }, (_, h) => {
-            const hour = startHour + h * 0.5;
-            return `<div class="hour" style="top: ${h * 15}px" onclick="selectSlot(${i}, ${hour})">${hour % 1 === 0 ? hour + ':00' : ''}</div>`;
-          }).join('')}
-        </div>
-      `).join('');
-      fetchEvents();
+        const hoursDiv = document.getElementById('hours');
+        hoursDiv.innerHTML = days.map((_, i) => `
+            <div class="hour-column" data-day="${i}">
+                ${Array.from({ length: (endHour - startHour) * 2 }, (_, h) => {
+                    const hour = startHour + h * 0.5;
+                    return `<div class="hour" style="top: ${h * 15}px" onclick="selectSlot(${i}, ${hour})">${hour % 1 === 0 ? hour + ':00' : ''}</div>`;
+                }).join('')}
+            </div>
+        `).join('');
+        fetchEvents();
+        setupDragAndDrop();
+    }
+
+    function setupDragAndDrop() {
+        interact('.event').draggable({
+            onmove: event => {
+                const target = event.target;
+                const y = (parseFloat(target.getAttribute('data-y')) || 0) + event.dy;
+                target.style.transform = `translate(0, ${y}px)`;
+                target.setAttribute('data-y', y);
+            },
+            onend: async event => {
+                const target = event.target;
+                const id = target.getAttribute('data-id');
+                const dayIndex = parseInt(target.parentElement.getAttribute('data-day'));
+                const newHour = parseFloat(target.getAttribute('data-hour')) + (parseFloat(target.getAttribute('data-y')) || 0) / 30;
+                const newDate = new Date(startOfWeek);
+                newDate.setDate(startOfWeek.getDate() + dayIndex);
+                newDate.setUTCHours(Math.floor(newHour), newHour % 1 * 60, 0, 0);
+                await fetch(`/api/events/${id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ start_time: newDate.toISOString() })
+                });
+                renderCalendar(); // Refresh calendar
+            }
+        });
     }
 
     function selectSlot(day, hour) {
-      selectedSlot = { day, hour };
-      const form = document.getElementById('eventForm');
-      form.style.display = 'block';
-      document.getElementById('startTime').value = new Date(Date.UTC(2025, 2, 24 + day, Math.floor(hour), hour % 1 * 60)).toISOString().slice(0, -1) + 'Z';
+        selectedSlot = { day, hour };
+        const form = document.getElementById('eventForm');
+        form.style.display = 'block';
+        const eventDate = new Date(startOfWeek);
+        eventDate.setDate(startOfWeek.getDate() + day);
+        eventDate.setUTCHours(Math.floor(hour), hour % 1 * 60, 0, 0);
+        document.getElementById('startTime').value = eventDate.toISOString().slice(0, -1) + 'Z';
     }
 
     async function saveEvent() {
-      const event = {
-        event_name: document.getElementById('eventName').value,
-        start_time: document.getElementById('startTime').value,
-        duration: parseInt(document.getElementById('duration').value) || 30,
-        description: document.getElementById('description').value,
-        project: document.getElementById('project').value
-      };
-      await fetch('/api/events', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(event)
-      });
-      closeForm();
-      renderCalendar();
+        const event = {
+            event_name: document.getElementById('eventName').value,
+            start_time: document.getElementById('startTime').value,
+            duration: parseInt(document.getElementById('duration').value) || 30,
+            description: document.getElementById('description').value,
+            project: document.getElementById('project').value,
+            recurrence: document.getElementById('recurrence').value
+        };
+        await fetch('/api/events', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(event)
+        });
+        if (event.recurrence !== 'none') {
+            const occurrences = event.recurrence === 'daily' ? 7 : 4; // 1 week or 1 month
+            for (let i = 1; i < occurrences; i++) {
+                const newDate = new Date(event.start_time);
+                newDate.setDate(newDate.getDate() + (event.recurrence === 'daily' ? i : i * 7));
+                await fetch('/api/events', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...event, start_time: newDate.toISOString() })
+                });
+            }
+        }
+        closeForm();
+        renderCalendar();
     }
 
     function closeForm() {
-      document.getElementById('eventForm').style.display = 'none';
-      selectedSlot = null;
+        document.getElementById('eventForm').style.display = 'none';
+        selectedSlot = null;
     }
 
     async function fetchEvents() {
-      const res = await fetch('/api/events');
-      const events = await res.json();
-      events.forEach(event => {
-        const date = new Date(event.start_time);
-        const dayIndex = date.getUTCDay() === 0 ? 6 : date.getUTCDay() - 1;
-        const hour = date.getUTCHours() + date.getUTCMinutes() / 60;
-        const duration = event.duration / 60;
-        const column = document.querySelector(`.hour-column[data-day="${dayIndex}"]`);
-        if (column) {
-          const div = document.createElement('div');
-          div.className = 'event';
-          div.style.top = `${hour * 15 * 2}px`;
-          div.style.height = `${duration * 15 * 2}px`;
-          div.innerHTML = `${event.event_name} (${event.approved ? 'Approved' : 'Pending'})<br>${event.project || 'No Project'}`;
-          div.onclick = () => deleteEvent(event.id);
-          column.appendChild(div);
-        }
-      });
+        const res = await fetch('/api/events');
+        const events = await res.json();
+        events.forEach(event => {
+            const date = new Date(event.start_time);
+            const dayIndex = date.getUTCDay() === 0 ? 6 : date.getUTCDay() - 1;
+            const hour = date.getUTCHours() + date.getUTCMinutes() / 60;
+            const duration = event.duration / 60;
+            const column = document.querySelector(`.hour-column[data-day="${dayIndex}"]`);
+            if (column) {
+                const div = document.createElement('div');
+                div.className = 'event';
+                div.setAttribute('data-id', event.id);
+                div.setAttribute('data-hour', hour);
+                div.style.top = `${hour * 15 * 2}px`;
+                div.style.height = `${duration * 15 * 2}px`;
+                div.innerHTML = `${event.event_name} (${event.approved ? 'Approved' : 'Pending'})<br>${event.project || 'No Project'}`;
+                div.onclick = e => { e.stopPropagation(); deleteEvent(event.id); };
+                column.appendChild(div);
+            }
+        });
     }
 
     async function deleteEvent(id) {
-      await fetch(`/api/events/${id}`, { method: 'DELETE' });
-      renderCalendar();
+        await fetch(`/api/events/${id}`, { method: 'DELETE' });
+        renderCalendar();
     }
 
     async function askAgent() {
-      const input = document.getElementById('agentInput').value;
-      const res = await fetch('/ollama/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'llama3.2', prompt: input })
-      });
-      const data = await res.json();
-      document.getElementById('agentResponse').innerHTML = data.response;
+    const input = document.getElementById('agentInput').value;
+    if (input.startsWith('research:')) {
+        const query = input.slice(9).trim();
+        const res = await fetch(`/searxng/search?q=${encodeURIComponent(query)}&format=json`);
+        const data = await res.json();
+        const topResult = data.results[0];
+        document.getElementById('agentResponse').innerHTML += `<p>Top result: <a href="${topResult.url}" target="_blank">${topResult.title}</a></p>`;
+    } else {
+        let prompt = input;
+        if (input.toLowerCase().includes('schedule')) {
+            const events = await (await fetch('/api/events')).json();
+            prompt = `Given my events: ${JSON.stringify(events.map(e => ({ name: e.event_name, start: e.start_time, duration: e.duration })))},
+                      suggest a 30-minute time slot this week for: "${input}". Return the suggestion in ISO format (e.g., 2025-03-25T10:00:00Z).`;
+        }
+        const res = await fetch('/ollama/api/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'llama3.2', prompt })
+        });
+        const data = await res.json();
+        document.getElementById('agentResponse').innerHTML += `<p>${data.response}</p>`;
+        const match = data.response.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)/);
+        if (match) {
+            document.getElementById('startTime').value = match[1];
+            document.getElementById('eventForm').style.display = 'block';
+        }
     }
+}
 
     renderCalendar();
-  </script>
-</body>
+</script></body>
 </html>
+

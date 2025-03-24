@@ -5,6 +5,3 @@ RUN npm install
 COPY . .
 EXPOSE 8080
 CMD ["node", "server.js"]
-FROM nginx:latest
-COPY nginx.conf /etc/nginx/nginx.conf
-EXPOSE 80

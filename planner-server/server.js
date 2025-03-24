@@ -10,7 +10,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS events (
     duration INTEGER,
     approved INTEGER DEFAULT 0,
     description TEXT,
-    project TEXT
+    project TEXT,
+    recurrence TEXT DEFAULT 'none'
 )`);
 
 app.get('/events', (req, res) => {

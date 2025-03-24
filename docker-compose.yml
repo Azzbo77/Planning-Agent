@@ -31,6 +31,8 @@ services:
     container_name: searxng
     environment:
       - BASE_URL=http://localhost/searxng/
+    ports:
+      - "8888:8888" # Expose for debugging, remove if only accessed via Nginx
     restart: unless-stopped
 volumes:
   planner-data:
