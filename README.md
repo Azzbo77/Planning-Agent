@@ -1,4 +1,4 @@
-# Planning Agentr
+# Planning Agent
 A project management tool with a calendar UI, AI scheduling via Ollama, and web research via SearxNG. Work in progress.
 
 ## Current Features
